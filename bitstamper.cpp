@@ -445,7 +445,7 @@ bytesToSkip=7135458961;
             int c=fgetc(file);
             while(c!=EOF) {
                 if(m.check(c)) {
-                    cout << "Stamp found! \"" << fileName << "\" timestamped at " << t.getTime();
+                    cout << "Stamp found! \"" << fileName << "\" was timestamped at " << t.getTime();
                     if(verbose) {
                         cout << t.getBytesRead() << " bytes actually read" << endl;
                         cout << "total " << (unchangedSkipBytes+t.getBytesRead()) << " bytes read" << endl;
