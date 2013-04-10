@@ -1,0 +1,7 @@
+Author: Andrew Newell
+
+An initial file that bitstamper has been used on. This file has been stamped which proves its existence in time. The security of this timestamp is equivalent to the security of the bitcoin protocol itself.
+
+You can check with the following command when this file was created (and hence a proof of when the project started):
+
+bitstamper validate Initial-File.txt

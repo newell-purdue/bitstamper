@@ -1,0 +1,51 @@
+This is BitStamper software. 
+
+
+Why bitstamp and what is BitStamper?
+
+The purpose of BitStamper is to create a permanent and provable timestamp that the file existed at a given time. Such a tool fits perfectly when you may need to prove later on that you did indeed possess a certain file at the current time (granularity of roughly 20 minutes). Specific scenarios could include:
+ - Bitstamping a photo of an apartment upon move-in to an apartment prove at move-out to your landlord that you did not cause certain damage during your stay.
+ - Standard electronic turn-in for a homework assignment is broken, you could bit-stamp the homework file prior to the deadline to prove to a teacher that you did not use extra time.
+ - Bitstamping a file containing your technical thoughts to be able to later claim that you indeed had certain ideas before others.
+
+Upon searching the computer science literature, an idea similar (nearly identical) had been conceived called CommitCoin from Financial Crypto 2012 (earlier than the writing of this project). This paper presents the idea without a real tool to implement it as they mention you don't necessary need a real tool if you understand the protocol. By using several online tools and services you can accomplish the same task and they call this procedure CommitCoin. You may refer to that for more explanations on how BitStamper is working. BitStamper will hopefully make this technique easier to adopt. As of writing this in May 2013, I have never seen any mention of CommitCoin outside of the proof-of-concept paper.
+
+
+Why BitStamper over other mechanisms of proving the time of data existence?
+
+Two main alternatives exists that are widely used today. First, simply give the file to the party that you will end up needing to convince at the time it should be created. This may be inappropriate in many cases, and you may not even know whom you will want to prove the existence of a file to until later in the future when such a proof is necessary. Second, let a trusted-third-party timestamp the file for you. E.g., give the file to Facebook and put trust in their timestamping mechanism. Such mechanisms could be exploited or the third party may not be trustworthy. The goal of many cryptographic protocols (definitely including bitcoin) is to remove such third-parties which is part of the reason for bitstamping.
+
+
+How does BitStamper work?
+
+To stamp, a hash of the file is treated as an address and the smallest denomination of a bitcoin (0.00000001 BTC) is payed to an address representing that hash. For a verifier to learn about a bitstamp, they download their own version of the bitcoin block chain and simply search for the hash in the block chain. The timestamp of the block which the hash is found in (if found) represents the bitstamp for that file. The security of a bitstamp is as secure as the bitcoin system itself which so far (as of April 2013) has proven to be a secure monetary system. To be secure means the ability to ensure someone cannot forge a bitstamp to be earlier in time.
+
+
+How to use?
+
+
+Compile with:
+make
+
+
+Install with:
+sudo make install
+
+
+Simple validate stamp:
+./bitstamper validate Initial-Stamp.txt
+
+For validating, you must have the block-chain downloaded. You can use the same bitcoind clients that are used for the normal BitCoin protocol to achieve this.
+
+
+Simple create stamp:
+./bitstamper stamp file.txt
+
+For stamping, you must have some bitcoins and have the bitcoind daemon running. The stamp command will tell the daemon to pay 0.00000001 BTC to the address that representes file.txt. Additionally, with the -j option you can just get the address and pay the 0.00000001 BTC to the address manually. This could be helpful if you do not want to run the full client and may be using webservices to perform transactions. Also, if you know a way to earn a small amount of BTC, you can have a small payment just made to the address instead of actually setting up a wallet for yourself.
+
+
+Most funcationality was newly written for this project (within bitstamper.cpp). The files uint256.h and bignum.h are from bitcoin source code, and these were copied over just to utilize the functionality of creating base58 encodings (for the bitcoin addresses).
+
+
+To come in future versions:
+I want to ensure possible adoption by larger audiences, so I want to create a simple GUI and non-unix builds.
