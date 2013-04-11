@@ -158,7 +158,7 @@ class Matcher {
         toMatch=(char*)malloc(num);
         for(int i=0;i<n;i++) {
             toMatch[i]=x[i];
-//            toMatch[n-1-i]=x[i];
+            //            toMatch[n-1-i]=x[i];
         }
         //memcpy(toMatch,x,num);
     }
@@ -185,6 +185,66 @@ class Matcher {
         return found;
     }
 };
+
+
+// This time keeper does not need to correctly read from the very beginning of the block-chain, it instead finds the preceeding "magic number" that starts every block and finds a timestamp based on that
+class UnsafeTimeKeeper {
+    private:
+    unsigned long int bytesCheckpoint;
+    unsigned long int bytesRead;
+    set<int> realTimes;
+    int blockNum;
+    time_t currentTime;
+    int bytesToTime;
+    unsigned int nextTime;
+    bool timeSet;
+    Matcher* blockStarter;
+    public:
+    unsigned long int getBytesRead() {
+        return bytesCheckpoint;
+    }
+    UnsafeTimeKeeper() {
+    char startValues[]={0xf9,0xbe,0xb4,0xd9};
+        blockStarter=new Matcher(startValues,4);
+        timeSet=false;
+        nextTime=0;
+        blockNum=-1;
+        bytesRead=0;
+    }
+    string getTime() {
+        if(!timeSet) {
+            return "";
+        }
+        return string(ctime(&currentTime));
+    }
+    void read(unsigned char x) {
+        bytesRead++;
+        bytesToTime--;
+        if(blockStarter->check(x)) {
+            bytesToTime=76;
+            blockNum++;
+            if(timeSet) {
+                if(verbose) {
+                    int realTime=time(NULL);
+                    if(realTimes.count(realTime)==0) {
+                        realTimes.insert(realTime);
+                        cout << "ALTERNATE: Checked up to " << getTime();
+                        cout << "ALTERNATE: " << bytesRead << " bytes read so far\n";
+                    }
+                }
+            }
+        }
+        if(bytesToTime<4&&bytesToTime>=0) {
+            nextTime+=pow(256,3-bytesToTime)*x;
+            if(bytesToTime==0) {
+                currentTime=nextTime;
+                timeSet=true;
+                nextTime=0;
+            }
+        }
+    }
+};
+
 
 class TimeKeeper {
     private:
@@ -398,15 +458,14 @@ int main(int argc,char* argv[]) {
     if(beginningStart) {
         bytesToSkip=0;
     } else {
-        //bytesToSkip=7142202419;
-//        bytesToSkip=99243107-8+157388147-8+6839349118-8;
-bytesToSkip=7135458961;
+        bytesToSkip=7135458961;
     }
     unsigned char hash[SHA_DIGEST_LENGTH];
     calcSha1(fileName.c_str(),hash);
     if(action=="validate") {
         Matcher m((char*)hash,SHA_DIGEST_LENGTH);
-        TimeKeeper t;
+        TimeKeeper safeT;
+        UnsafeTimeKeeper unsafeT;
         if(blockDir=="") {
             char* homeDir=getenv("HOME");
             if(homeDir==NULL) {
@@ -449,22 +508,36 @@ bytesToSkip=7135458961;
             int c=fgetc(file);
             while(c!=EOF) {
                 if(m.check(c)) {
-                    cout << "Stamp found! \"" << fileName << "\" was timestamped at " << t.getTime();
                     if(verbose) {
-                        cout << t.getBytesRead() << " bytes actually read" << endl;
-                        cout << "total " << (unchangedSkipBytes+t.getBytesRead()) << " bytes read" << endl;
+                        if(unsafeT.getTime()==safeT.getTime()) {
+                            cout << "both times agree!" << endl;
+                        } else {
+                            cout << "times do not agree!" << endl;
+                            cout << "most likely unsafe timekeeper is correct, but a sophisticated attack could fool this" << endl;
+                            cout << "safe timestamp \"" << fileName << "\" was timestamped at " << safeT.getTime();
+                            cout << "unsafe timestamp \"" << fileName << "\" was timestamped at " << unsafeT.getTime();
+                        }
+                    }
+                    cout << "Stamp found! \"" << fileName << "\" was timestamped at " << unsafeT.getTime();
+                    if(unsafeT.getTime()!=safeT.getTime()) {
+                        cout << "\nIMPORTANT! The file was definitely stamped at some point, but either the formatting of your block-chain is not correct or someone has performed a sophisticated attack to artificially change the timestamp" << endl;
+                    }
+                    if(verbose) {
+                        cout << safeT.getBytesRead() << " bytes actually read" << endl;
+                        cout << "total " << (unchangedSkipBytes+safeT.getBytesRead()) << " bytes read" << endl;
                     }
                     exit(0);
                 }
-                t.read(c);
+                safeT.read(c);
+                unsafeT.read(c);
                 c=fgetc(file);
             }
             fclose(file);
         }
         cout << "Stamp for " << fileName << " never found" << endl;
         if(verbose) {
-            cout << t.getBytesRead() << " bytes actually read" << endl;
-            cout << "total " << (unchangedSkipBytes+t.getBytesRead()) << " bytes read" << endl;
+            cout << safeT.getBytesRead() << " bytes actually read" << endl;
+            cout << "total " << (unchangedSkipBytes+safeT.getBytesRead()) << " bytes read" << endl;
         }
         exit(0);
     } else if(action=="stamp") {
@@ -483,15 +556,15 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
-		bool walletLocked = IsWalletLocked();
-	    if(walletLocked) {
-			SetStdinEcho(false);
-			string passphrase = "";
-			cout << "Enter your wallet passphrase (will not echo): \n";
-			getline(cin,passphrase);
-			string cmd="bitcoind walletpassphrase \""+passphrase+"\" 2"; 
-			passphrase = ""; // paranoia
-			SetStdinEcho(true);
+        bool walletLocked = IsWalletLocked();
+        if(walletLocked) {
+            SetStdinEcho(false);
+            string passphrase = "";
+            cout << "Enter your wallet passphrase (will not echo): \n";
+            getline(cin,passphrase);
+            string cmd="bitcoind walletpassphrase \""+passphrase+"\" 2"; 
+            passphrase = ""; // paranoia
+            SetStdinEcho(true);
             if(verbose) {
                 cout << "bitcoind walletpassphrase [your passphrase here] 2" << endl;
             }
@@ -499,7 +572,7 @@ bytesToSkip=7135458961;
                 cout << "couldn't decrypt wallet" << endl;
                 exit(1);
             }
-		}
+        }
         if(fromAccount!="") {
             string cmd="bitcoind sendtoaddress "+fromAccount+" "+base58Hash+" 0.00000001";
             if(verbose) {
@@ -519,8 +592,8 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
-	    if(walletLocked) {
-			string cmd="bitcoind walletlock";
+        if(walletLocked) {
+            string cmd="bitcoind walletlock";
             if(verbose) {
                 cout << cmd << endl;
             }
@@ -528,7 +601,7 @@ bytesToSkip=7135458961;
                 cout << "couldn't relock wallet" << endl;
                 exit(1);
             }
-		}
+        }
     } else {
         argumentError();
     }
@@ -536,48 +609,48 @@ bytesToSkip=7135458961;
 
 void SetStdinEcho(bool enable = true)
 {
-// taken from http://stackoverflow.com/posts/1455007/revisions
-#ifdef WIN32
+    // taken from http://stackoverflow.com/posts/1455007/revisions
+    #ifdef WIN32
     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE); 
     DWORD mode;
     GetConsoleMode(hStdin, &mode);
-
+    
     if( !enable )
-        mode &= ~ENABLE_ECHO_INPUT;
+    mode &= ~ENABLE_ECHO_INPUT;
     else
-        mode |= ENABLE_ECHO_INPUT;
-
+    mode |= ENABLE_ECHO_INPUT;
+    
     SetConsoleMode(hStdin, mode );
-
-#else
+    
+    #else
     struct termios tty;
     tcgetattr(STDIN_FILENO, &tty);
     if( !enable )
-        tty.c_lflag &= ~ECHO;
+    tty.c_lflag &= ~ECHO;
     else
-        tty.c_lflag |= ECHO;
-
+    tty.c_lflag |= ECHO;
+    
     (void) tcsetattr(STDIN_FILENO, TCSANOW, &tty);
-#endif
+    #endif
 }
 
 bool IsWalletLocked() {
-	FILE* pipe = popen("bitcoind getinfo", "r");
-	if (!pipe) return false;
-	char buffer[128];
-	char * pEnd;
-	std::string result = "";
-	while (!feof(pipe)) {
-		if (fgets(buffer, 128, pipe) != NULL)
-			result += buffer;
-	}
-	pclose(pipe);
-	unsigned foundAt = result.find("unlocked_until");
-	if (foundAt != std::string::npos) {
-		unsigned numStart = result.find_first_not_of("\": ",foundAt+15);
-		unsigned numEnd = result.find("\n",foundAt+15);	
-		long int unlocked_until = strtol(result.substr(numStart,numEnd).c_str(),&pEnd, 10); // bitcoin returns boost int64_t/1000
-		if (unlocked_until == 0) { return true; } // unlocked_until-time(0) = time left open
-	} 	
-	return false;
+    FILE* pipe = popen("bitcoind getinfo", "r");
+    if (!pipe) return false;
+    char buffer[128];
+    char * pEnd;
+    std::string result = "";
+    while (!feof(pipe)) {
+        if (fgets(buffer, 128, pipe) != NULL)
+        result += buffer;
+    }
+    pclose(pipe);
+    unsigned foundAt = result.find("unlocked_until");
+    if (foundAt != std::string::npos) {
+        unsigned numStart = result.find_first_not_of("\": ",foundAt+15);
+        unsigned numEnd = result.find("\n",foundAt+15);	
+        long int unlocked_until = strtol(result.substr(numStart,numEnd).c_str(),&pEnd, 10); // bitcoin returns boost int64_t/1000
+    if (unlocked_until == 0) { return true; } // unlocked_until-time(0) = time left open
+    } 	
+    return false;
 }
