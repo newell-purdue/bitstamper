@@ -18,6 +18,7 @@
 #include<time.h>
 #include<bignum.h>
 //#include<base58.h>
+#include<termios.h>
 
 #define BUFFER_SIZE 4096
 
@@ -25,6 +26,8 @@ using namespace std;
 bool verbose=false;
 
 static const char* pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+void SetStdinEcho(bool enable);
 
 string EncodeBase58(const unsigned char* pbegin, const unsigned char* pend) {
     CAutoBN_CTX pctx;
@@ -332,6 +335,7 @@ set<string> getBlockFiles(string blockDir) {
 
 int main(int argc,char* argv[]) {
     bool justAddress=false;
+	bool walletEncrypted=true;
     string blockDir="";
     string feeAmt="";
     string fileName="";
@@ -479,6 +483,22 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
+	    if(walletEncrypted) {
+			SetStdinEcho(false);
+			string passphrase = "";
+			cout << "Enter your wallet passphrase (will not echo): \n";
+			getline(cin,passphrase);
+			string cmd="bitcoind walletpassphrase \""+passphrase+"\" 10"; // 10 second timeout
+			passphrase = ""; // paranoia?
+			SetStdinEcho(true);
+            if(verbose) {
+                cout << "bitcoind walletpassphrase [your passphrase here] 10" << endl;
+            }
+            if(system(cmd.c_str())==-1) {
+                cout << "couldn't decrypt wallet" << endl;
+                exit(1);
+            }
+		}
         if(fromAccount!="") {
             string cmd="bitcoind sendtoaddress "+fromAccount+" "+base58Hash+" 0.00000001";
             if(verbose) {
@@ -498,7 +518,44 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
+	    if(walletEncrypted) {
+			string cmd="bitcoind walletlock";
+            if(verbose) {
+                cout << cmd << endl;
+            }
+            if(system(cmd.c_str())==-1) {
+                cout << "couldn't relock wallet" << endl;
+                exit(1);
+            }
+		}
     } else {
         argumentError();
     }
+}
+
+void SetStdinEcho(bool enable = true)
+{
+// taken from http://stackoverflow.com/posts/1455007/revisions
+#ifdef WIN32
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE); 
+    DWORD mode;
+    GetConsoleMode(hStdin, &mode);
+
+    if( !enable )
+        mode &= ~ENABLE_ECHO_INPUT;
+    else
+        mode |= ENABLE_ECHO_INPUT;
+
+    SetConsoleMode(hStdin, mode );
+
+#else
+    struct termios tty;
+    tcgetattr(STDIN_FILENO, &tty);
+    if( !enable )
+        tty.c_lflag &= ~ECHO;
+    else
+        tty.c_lflag |= ECHO;
+
+    (void) tcsetattr(STDIN_FILENO, TCSANOW, &tty);
+#endif
 }
