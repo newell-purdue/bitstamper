@@ -248,27 +248,32 @@ class UnsafeTimeKeeper {
 
 class TimeKeeper {
     private:
-    unsigned long int bytesCheckpoint;
+    unsigned long int bytesSinceProblem;
     unsigned long int bytesRead;
     set<int> realTimes;
     int blockNum;
     time_t currentTime;
     int bytesToSize;
     int bytesToTime;
-    unsigned int nextSize;
+    unsigned int blockSize;
     unsigned int nextTime;
     bool timeSet;
+    bool alignMode;
+    int betweenBlockSize;
+    Matcher* blockStarter;
     public:
     unsigned long int getBytesRead() {
-        return bytesCheckpoint;
+        return bytesRead;
     }
     TimeKeeper() {
+    char startValues[]={0xf9,0xbe,0xb4,0xd9};
+        blockStarter=new Matcher(startValues,4);
+        alignMode=true;
         timeSet=false;
-        bytesToSize=8;
-        nextTime=0;
-        nextSize=0;
-        blockNum=-1;
         bytesRead=0;
+        blockNum=-1;
+        betweenBlockSize=0;
+        bytesSinceProblem=0;
     }
     string getTime() {
         if(!timeSet) {
@@ -276,41 +281,63 @@ class TimeKeeper {
         }
         return string(ctime(&currentTime));
     }
+    unsigned long int getBytesSinceProblem() {
+        return bytesSinceProblem;
+    }
     void read(unsigned char x) {
         bytesRead++;
-        bytesToSize--;
-        bytesToTime--;
-        if(bytesToSize<4) {
-            nextSize+=pow(256,3-bytesToSize)*x;
-            if(bytesToSize==0) {
-                bytesToSize=nextSize+8;
-                bytesToTime=72;
-                nextSize=0;
-                blockNum++;
-                bytesCheckpoint=bytesRead-8;
-                if(timeSet) {
-                    if(verbose) {
+        bytesSinceProblem++;
+        if(alignMode) {
+            betweenBlockSize++;
+            if(blockStarter->check(x)) {
+                bytesToSize=4;
+                blockSize=0;
+                nextTime=0;
+                alignMode=false;
+                if(verbose) {
+                    if(betweenBlockSize>4) {
+                        cout << "strange alignment occured as " << betweenBlockSize << " bytes found between blocks, will attempt to fix" << endl;
+                        bytesSinceProblem=0;
+                    }
+                }
+            }
+        } else {
+            bytesToSize--;
+            if(bytesToSize<4&&bytesToSize>=0) {
+                blockSize+=pow(256,3-bytesToSize)*x;
+                if(bytesToSize==0) {
+                    if(blockSize>pow(2,20)) {
+                        alignMode=true;
+                        return;
+                    }
+                    bytesToTime=72;
+                    blockNum++;
+                    if(timeSet&&verbose) {
                         int realTime=time(NULL);
                         if(realTimes.count(realTime)==0) {
                             realTimes.insert(realTime);
                             cout << "Checked up to " << getTime();
-                            cout << bytesRead << " bytes read so far\n";
+                            //                            cout << bytesRead << " bytes read so far\n";
                         }
                     }
                 }
+            } else {
+                bytesToTime--;
+                blockSize--;
+                if(bytesToTime<4&&bytesToTime>=0) {
+                    nextTime+=pow(256,3-bytesToTime)*x;
+                    if(bytesToTime==0) {
+                        currentTime=nextTime;
+                        timeSet=true;
+                        nextTime=0;
+                    }
+                }
+                if(blockSize==0) {
+                    alignMode=true;
+                    betweenBlockSize=0;
+                }
             }
         }
-        if(bytesToTime<4&&bytesToTime>=0) {
-            nextTime+=pow(256,3-bytesToTime)*x;
-            if(bytesToTime==0) {
-                currentTime=nextTime;
-                timeSet=true;
-                nextTime=0;
-            }
-        }
-        /*        cout << "bytes to next size " << bytesToSize << endl;
-        cout << "bytes to next time " << bytesToTime << endl;
-        cout << "current time " << getTime() << endl;*/
     }
 };
 
@@ -384,7 +411,7 @@ set<string> getBlockFiles(string blockDir) {
                 allNumbers=false;
             }
         }
-        if(allNumbers&&firstPart=="/blk"&&secondPart==".dat") {
+        if(allNumbers&&firstPart=="/blk"&&secondPart==".dat"&&i->find("testnet")==string::npos) {
             blockFiles.insert(*i);
             if(verbose) {
                 cout << "File " << (*i) << " added to be checked, assumed to be part of block chain" << endl;
@@ -465,7 +492,6 @@ int main(int argc,char* argv[]) {
     if(action=="validate") {
         Matcher m((char*)hash,SHA_DIGEST_LENGTH);
         TimeKeeper safeT;
-        UnsafeTimeKeeper unsafeT;
         if(blockDir=="") {
             char* homeDir=getenv("HOME");
             if(homeDir==NULL) {
@@ -482,7 +508,10 @@ int main(int argc,char* argv[]) {
                 exit(1);
             }
             if(verbose) {
-                cout << bytesToSkip << " " << s.st_size << endl;
+                if(bytesToSkip>0) {
+                    cout << "bytes to skip (optimization): " << bytesToSkip << endl;
+                }
+                cout << "size of " << (*i) << ": " << s.st_size << endl;
             }
             if(((unsigned long int)s.st_size)<=bytesToSkip) {
                 bytesToSkip-=s.st_size;
@@ -508,28 +537,18 @@ int main(int argc,char* argv[]) {
             int c=fgetc(file);
             while(c!=EOF) {
                 if(m.check(c)) {
-                    if(verbose) {
-                        if(unsafeT.getTime()==safeT.getTime()) {
-                            cout << "both times agree!" << endl;
-                        } else {
-                            cout << "times do not agree!" << endl;
-                            cout << "most likely unsafe timekeeper is correct, but a sophisticated attack could fool this" << endl;
-                            cout << "safe timestamp \"" << fileName << "\" was timestamped at " << safeT.getTime();
-                            cout << "unsafe timestamp \"" << fileName << "\" was timestamped at " << unsafeT.getTime();
-                        }
-                    }
-                    cout << "Stamp found! \"" << fileName << "\" was timestamped at " << unsafeT.getTime();
-                    if(unsafeT.getTime()!=safeT.getTime()) {
-                        cout << "\nIMPORTANT! The file was definitely stamped at some point, but either the formatting of your block-chain is not correct or someone has performed a sophisticated attack to artificially change the timestamp" << endl;
+                    cout << "Stamp found! \"" << fileName << "\" was timestamped at " << safeT.getTime();
+                    if(safeT.getBytesSinceProblem()<(unsigned long int)pow(2,20)) {
+                        cout << "WARNING! Either there was a malformed block near the timestamp or someone has attempted to perform a sophisticated attack on the block-chain, to really ensure it is not an attack you must redownload the block-chain with a recent bitcoin client" << endl;
                     }
                     if(verbose) {
                         cout << safeT.getBytesRead() << " bytes actually read" << endl;
-                        cout << "total " << (unchangedSkipBytes+safeT.getBytesRead()) << " bytes read" << endl;
+                        cout << "ended on byte " <<  (unchangedSkipBytes+safeT.getBytesRead()) << " of the block-chain" << endl;
+cout << "bytes since last alignment issue " << safeT.getBytesSinceProblem() << endl;
                     }
                     exit(0);
                 }
                 safeT.read(c);
-                unsafeT.read(c);
                 c=fgetc(file);
             }
             fclose(file);
