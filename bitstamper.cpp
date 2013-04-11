@@ -28,6 +28,7 @@ bool verbose=false;
 static const char* pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 void SetStdinEcho(bool enable);
+bool IsWalletLocked();
 
 string EncodeBase58(const unsigned char* pbegin, const unsigned char* pend) {
     CAutoBN_CTX pctx;
@@ -335,7 +336,6 @@ set<string> getBlockFiles(string blockDir) {
 
 int main(int argc,char* argv[]) {
     bool justAddress=false;
-	bool walletEncrypted=true;
     string blockDir="";
     string feeAmt="";
     string fileName="";
@@ -483,16 +483,17 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
-	    if(walletEncrypted) {
+		bool walletLocked = IsWalletLocked();
+	    if(walletLocked) {
 			SetStdinEcho(false);
 			string passphrase = "";
 			cout << "Enter your wallet passphrase (will not echo): \n";
 			getline(cin,passphrase);
-			string cmd="bitcoind walletpassphrase \""+passphrase+"\" 10"; // 10 second timeout
-			passphrase = ""; // paranoia?
+			string cmd="bitcoind walletpassphrase \""+passphrase+"\" 2"; 
+			passphrase = ""; // paranoia
 			SetStdinEcho(true);
             if(verbose) {
-                cout << "bitcoind walletpassphrase [your passphrase here] 10" << endl;
+                cout << "bitcoind walletpassphrase [your passphrase here] 2" << endl;
             }
             if(system(cmd.c_str())==-1) {
                 cout << "couldn't decrypt wallet" << endl;
@@ -518,7 +519,7 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
-	    if(walletEncrypted) {
+	    if(walletLocked) {
 			string cmd="bitcoind walletlock";
             if(verbose) {
                 cout << cmd << endl;
@@ -558,4 +559,25 @@ void SetStdinEcho(bool enable = true)
 
     (void) tcsetattr(STDIN_FILENO, TCSANOW, &tty);
 #endif
+}
+
+bool IsWalletLocked() {
+	FILE* pipe = popen("bitcoind getinfo", "r");
+	if (!pipe) return false;
+	char buffer[128];
+	char * pEnd;
+	std::string result = "";
+	while (!feof(pipe)) {
+		if (fgets(buffer, 128, pipe) != NULL)
+			result += buffer;
+	}
+	pclose(pipe);
+	unsigned foundAt = result.find("unlocked_until");
+	if (foundAt != std::string::npos) {
+		unsigned numStart = result.find_first_not_of("\": ",foundAt+15);
+		unsigned numEnd = result.find("\n",foundAt+15);	
+		long int unlocked_until = strtol(result.substr(numStart,numEnd).c_str(),&pEnd, 10); // bitcoin returns boost int64_t/1000
+		if (unlocked_until == 0) { return true; } // unlocked_until-time(0) = time left open
+	} 	
+	return false;
 }
