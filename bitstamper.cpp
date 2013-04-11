@@ -18,6 +18,7 @@
 #include<time.h>
 #include<bignum.h>
 //#include<base58.h>
+#include<termios.h>
 
 #define BUFFER_SIZE 4096
 
@@ -25,6 +26,9 @@ using namespace std;
 bool verbose=false;
 
 static const char* pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+void SetStdinEcho(bool enable);
+bool IsWalletLocked();
 
 string EncodeBase58(const unsigned char* pbegin, const unsigned char* pend) {
     CAutoBN_CTX pctx;
@@ -479,6 +483,23 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
+		bool walletLocked = IsWalletLocked();
+	    if(walletLocked) {
+			SetStdinEcho(false);
+			string passphrase = "";
+			cout << "Enter your wallet passphrase (will not echo): \n";
+			getline(cin,passphrase);
+			string cmd="bitcoind walletpassphrase \""+passphrase+"\" 2"; 
+			passphrase = ""; // paranoia
+			SetStdinEcho(true);
+            if(verbose) {
+                cout << "bitcoind walletpassphrase [your passphrase here] 2" << endl;
+            }
+            if(system(cmd.c_str())==-1) {
+                cout << "couldn't decrypt wallet" << endl;
+                exit(1);
+            }
+		}
         if(fromAccount!="") {
             string cmd="bitcoind sendtoaddress "+fromAccount+" "+base58Hash+" 0.00000001";
             if(verbose) {
@@ -498,7 +519,65 @@ bytesToSkip=7135458961;
                 exit(1);
             }
         }
+	    if(walletLocked) {
+			string cmd="bitcoind walletlock";
+            if(verbose) {
+                cout << cmd << endl;
+            }
+            if(system(cmd.c_str())==-1) {
+                cout << "couldn't relock wallet" << endl;
+                exit(1);
+            }
+		}
     } else {
         argumentError();
     }
+}
+
+void SetStdinEcho(bool enable = true)
+{
+// taken from http://stackoverflow.com/posts/1455007/revisions
+#ifdef WIN32
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE); 
+    DWORD mode;
+    GetConsoleMode(hStdin, &mode);
+
+    if( !enable )
+        mode &= ~ENABLE_ECHO_INPUT;
+    else
+        mode |= ENABLE_ECHO_INPUT;
+
+    SetConsoleMode(hStdin, mode );
+
+#else
+    struct termios tty;
+    tcgetattr(STDIN_FILENO, &tty);
+    if( !enable )
+        tty.c_lflag &= ~ECHO;
+    else
+        tty.c_lflag |= ECHO;
+
+    (void) tcsetattr(STDIN_FILENO, TCSANOW, &tty);
+#endif
+}
+
+bool IsWalletLocked() {
+	FILE* pipe = popen("bitcoind getinfo", "r");
+	if (!pipe) return false;
+	char buffer[128];
+	char * pEnd;
+	std::string result = "";
+	while (!feof(pipe)) {
+		if (fgets(buffer, 128, pipe) != NULL)
+			result += buffer;
+	}
+	pclose(pipe);
+	unsigned foundAt = result.find("unlocked_until");
+	if (foundAt != std::string::npos) {
+		unsigned numStart = result.find_first_not_of("\": ",foundAt+15);
+		unsigned numEnd = result.find("\n",foundAt+15);	
+		long int unlocked_until = strtol(result.substr(numStart,numEnd).c_str(),&pEnd, 10); // bitcoin returns boost int64_t/1000
+		if (unlocked_until == 0) { return true; } // unlocked_until-time(0) = time left open
+	} 	
+	return false;
 }
